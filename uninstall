@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PLUGIN_ID="io.github.goooooooooody.omarchy-pebble-voice"
+PLUGIN_HOME="${HOME}/.config/omarchy/plugins/${PLUGIN_ID}"
+BINDINGS="${HOME}/.config/hypr/bindings.lua"
+MARK_START="-- pebble-voice:start"
+MARK_END="-- pebble-voice:end"
+
+if command -v omarchy >/dev/null; then
+  omarchy plugin disable "${PLUGIN_ID}" 2>/dev/null || true
+fi
+
+if [[ -L ${PLUGIN_HOME} ]]; then
+  rm -f "${PLUGIN_HOME}"
+fi
+
+if [[ -f ${BINDINGS} ]] && grep -Fq "${MARK_START}" "${BINDINGS}"; then
+  python3 - <<PY
+from pathlib import Path
+path = Path("${BINDINGS}")
+text = path.read_text()
+start = text.find("${MARK_START}")
+end = text.find("${MARK_END}")
+if start >= 0 and end > start:
+    end = end + len("${MARK_END}")
+    path.write_text(text[:start].rstrip() + "\n" + text[end:].lstrip("\n"))
+PY
+fi
+
+echo "Pebble Voice removed. The VoxType daemon was left running."

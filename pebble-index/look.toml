@@ -1,0 +1,11 @@
+id = "look"
+label = "Look"
+description = "Explain the focused window. Use when the user asks what this is, how this works, what is on screen, or to explain this."
+match = "regex"
+pattern = "(?i)\\b(?:what(?:['’]?s| is) (?:this|that|on (?:my |the )?screen)|how does (?:this|that) work|explain (?:this|that)|what am i looking at)\\b"
+builtin = "agent"
+context = ["active-window"]
+require = ["agent_enabled"]
+priority = 90
+fields = ["title", "prompt"]
+glyph = "󰍉"

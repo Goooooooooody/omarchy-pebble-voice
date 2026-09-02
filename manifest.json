@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.goooooooooody.omarchy-pebble-voice",
+  "name": "Pebble Voice",
+  "version": "0.1.0",
+  "author": "goody",
+  "description": "Siri-like voice overlay for Omarchy. VoxType transcribes; Pebble Index classifies and dispatches.",
+  "license": "MIT",
+  "keepLoaded": true,
+  "kinds": ["overlay", "bar-widget"],
+  "entryPoints": {
+    "overlay": "Overlay.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Pebble Voice",
+    "description": "Listen, transcribe with VoxType, and dispatch through Pebble Index",
+    "category": "Capture",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+RUNTIME="${XDG_RUNTIME_DIR:-/tmp}/omarchy-pebble-voice"
+TRANSCRIPT="${RUNTIME}/transcript.txt"
+SNAPSHOT="${RUNTIME}/window.png"
+VOXTYPE_CANCEL="${XDG_RUNTIME_DIR:-/tmp}/voxtype/cancel"
+
+runtime_dir() {
+  mkdir -p "${RUNTIME}"
+  chmod 700 "${RUNTIME}"
+}
+
+find_index() {
+  local candidate
+  for candidate in \
+    "${HOME}/.local/bin/pebble-index" \
+    "${HOME}/.config/omarchy/plugins/io.github.goooooooooody.omarchy-pebble-index/bin/pebble-index" \
+    "${HOME}/.config/omarchy/plugins/io.github.goody.omarchy-pebble-index/bin/pebble-index"
+  do
+    if [[ -x ${candidate} ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  command -v pebble-index
+}
+
+voxtype_ok() {
+  command -v voxtype >/dev/null
+}
+
+voxtype_osd_pids() {
+  # comm is truncated to 15 chars; -f would also match this script.
+  pgrep -u "$(id -u)" -x voxtype-osd-gtk || true
+}
+
+freeze_voxtype_osd() {
+  local pid
+  for pid in $(voxtype_osd_pids); do
+    kill -STOP "${pid}" 2>/dev/null || true
+  done
+}
+
+thaw_voxtype_osd() {
+  local pid
+  for pid in $(voxtype_osd_pids); do
+    kill -CONT "${pid}" 2>/dev/null || true
+  done
+}
+
+clear_voxtype_cancel() {
+  rm -f "${VOXTYPE_CANCEL}"
+}
+
+daemon_ok() {
+  voxtype_ok || return 1
+  local status
+  status="$(voxtype status --format json 2>/dev/null || true)"
+  [[ -n ${status} && ${status} != *'"tooltip": "Voxtype not running"'* ]]
+}
+
+snapshot_window() {
+  runtime_dir
+  local index receiver
+  index="$(find_index 2>/dev/null || true)"
+  if [[ -n ${index} ]]; then
+    receiver="$(cd -- "$(dirname -- "${index}")/.." && pwd)/receiver"
+    PYTHONPATH="${receiver}${PYTHONPATH:+:${PYTHONPATH}}" python3 -c \
+      "from pathlib import Path; from pebble_index.screen import capture_active_window; p=capture_active_window(Path(r'${SNAPSHOT}')); raise SystemExit(0 if p else 1)"
+    [[ -f ${SNAPSHOT} && -s ${SNAPSHOT} ]] || return 1
+    printf '%s\n' "${SNAPSHOT}"
+    return 0
+  fi
+  local geo
+  geo="$(hyprctl activewindow -j | python3 -c 'import json,sys; w=json.load(sys.stdin); print("%s,%s %sx%s" % (w["at"][0], w["at"][1], w["size"][0], w["size"][1]))')"
+  grim -g "${geo}" "${SNAPSHOT}"
+  printf '%s\n' "${SNAPSHOT}"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "${cmd}" in
+ready)
+  index="$(find_index 2>/dev/null || true)"
+  voxtype_ok && vox=1 || vox=0
+  daemon_ok && daemon=1 || daemon=0
+  python3 -c "import json,sys; print(json.dumps({
+    'voxtype': sys.argv[1]=='1',
+    'daemon': sys.argv[2]=='1',
+    'index': bool(sys.argv[3]),
+    'indexPath': sys.argv[3],
+  }))" "${vox}" "${daemon}" "${index}"
+  ;;
+snapshot)
+  snapshot_window
+  ;;
+start)
+  runtime_dir
+  rm -f "${TRANSCRIPT}"
+  : > "${TRANSCRIPT}"
+  clear_voxtype_cancel
+  freeze_voxtype_osd
+  if voxtype record start --help 2>&1 | grep -q -- '--no-osd'; then
+    voxtype record start --file="${TRANSCRIPT}" --no-osd
+  else
+    voxtype record start --file="${TRANSCRIPT}"
+  fi
+  ;;
+stop)
+  voxtype record stop
+  ;;
+cancel)
+  voxtype record cancel || true
+  for _ in 1 2 3 4 5 6 7 8; do
+    status="$(voxtype status --format json 2>/dev/null || true)"
+    case ${status} in
+      *'"class": "idle"'*|*'"alt": "idle"'*) break ;;
+    esac
+    sleep 0.05
+  done
+  clear_voxtype_cancel
+  thaw_voxtype_osd
+  ;;
+thaw)
+  thaw_voxtype_osd
+  ;;
+status)
+  voxtype status --format json
+  ;;
+capture)
+  thaw_voxtype_osd
+  index="$(find_index)" || {
+    printf '%s\n' '{"status":"error","detail":"pebble-index is not installed"}'
+    exit 1
+  }
+  text="$(cat "${TRANSCRIPT}" 2>/dev/null || true)"
+  args=(capture --text "${text}" --client voice --trigger overlay)
+  if [[ -f ${SNAPSHOT} && -s ${SNAPSHOT} ]]; then
+    args+=(--screenshot "${SNAPSHOT}")
+  fi
+  exec "${index}" "${args[@]}"
+  ;;
+actions)
+  index="$(find_index)" || {
+    printf '%s\n' '{"actions":[]}'
+    exit 1
+  }
+  exec "${index}" actions --json
+  ;;
+transcript)
+  [[ -f ${TRANSCRIPT} ]] && cat "${TRANSCRIPT}"
+  ;;
+*)
+  echo "Usage: pebble-voice ready|snapshot|start|stop|cancel|thaw|status|capture|actions|transcript" >&2
+  exit 2
+  ;;
+esac

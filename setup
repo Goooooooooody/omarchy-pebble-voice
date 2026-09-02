@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+PLUGIN_ID="io.github.goooooooooody.omarchy-pebble-voice"
+PLUGIN_HOME="${HOME}/.config/omarchy/plugins/${PLUGIN_ID}"
+BINDINGS="${HOME}/.config/hypr/bindings.lua"
+MARK_START="-- pebble-voice:start"
+MARK_END="-- pebble-voice:end"
+
+for dependency in voxtype grim hyprctl; do
+  command -v "${dependency}" >/dev/null || {
+    echo "Missing required tool: ${dependency}" >&2
+    exit 127
+  }
+done
+
+if [[ ! -x ${HOME}/.local/bin/pebble-index ]] && [[ ! -x ${HOME}/.config/omarchy/plugins/io.github.goooooooooody.omarchy-pebble-index/bin/pebble-index ]]; then
+  echo "Install and run setup for omarchy-pebble-index first." >&2
+  exit 1
+fi
+
+if [[ "${SCRIPT_DIR}" != "${PLUGIN_HOME}" ]]; then
+  mkdir -p "$(dirname "${PLUGIN_HOME}")"
+  if [[ -e ${PLUGIN_HOME} && ! -L ${PLUGIN_HOME} ]]; then
+    echo "Plugin directory already exists at ${PLUGIN_HOME}." >&2
+    exit 1
+  fi
+  ln -sfn "${SCRIPT_DIR}" "${PLUGIN_HOME}"
+  echo "Linked ${SCRIPT_DIR} -> ${PLUGIN_HOME}"
+fi
+
+chmod +x "${SCRIPT_DIR}/bin/pebble-voice" "${SCRIPT_DIR}/setup" "${SCRIPT_DIR}/uninstall"
+
+if command -v omarchy >/dev/null; then
+  omarchy plugin enable "${PLUGIN_ID}" --section right || true
+fi
+
+if systemctl --user list-unit-files voxtype.service >/dev/null 2>&1; then
+  systemctl --user enable --now voxtype.service || true
+fi
+
+if [[ -f ${BINDINGS} ]] && ! grep -Fq "${MARK_START}" "${BINDINGS}"; then
+  cat >> "${BINDINGS}" <<EOF
+
+${MARK_START}
+o.bind("SUPER + Page_Down", "Pebble Voice", "omarchy-shell shell call ${PLUGIN_ID} activate '{}'")
+${MARK_END}
+EOF
+  echo "Bound SUPER + Page_Down in ${BINDINGS}"
+fi
+
+if command -v omarchy-shell >/dev/null; then
+  omarchy-shell shell rescanPlugins || true
+fi
+
+cat <<EOF
+
+Pebble Voice is installed.
+
+  Hotkey: SUPER + Page_Down
+  Bar:    Pebble Voice widget (mic)
+
+Speak, then press the hotkey again. “What is this” / “how does this work”
+captures the focused window and sends it to omarchy agent.
+
+No sudo is required. Uninstall with: ${SCRIPT_DIR}/uninstall
+EOF
